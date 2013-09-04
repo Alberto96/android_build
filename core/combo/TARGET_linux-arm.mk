@@ -89,7 +89,11 @@ TARGET_arm_CFLAGS :=    -O3 \
                         -ftree-vectorize \
                         -pipe $(STRICT_ALIASING_WARNINGS)
 
-# THUMB SUX BALLS. but we'll still compile it here and get rid of always true shit.
+# Modules can choose to compile some source as thumb. As
+# non-thumb enabled targets are supported, this is treated
+# as a 'hint'. If thumb is not enabled, these files are just
+# compiled as ARM.
+ifeq ($(ARCH_ARM_HAVE_THUMB_SUPPORT),true)
 TARGET_thumb_CFLAGS :=  -mthumb \
                         -O3 \
                         -fomit-frame-pointer \
