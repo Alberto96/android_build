@@ -34,20 +34,9 @@ ifeq ($(strip $(TARGET_ARCH_VARIANT)),)
 TARGET_ARCH_VARIANT := armv5te
 endif
 
-# default target GCC version
-ifeq ($(strip $(TARGET_GCC_VERSION)),)
-TARGET_GCC_VERSION := 4.8
-endif
-
 TARGET_ARCH_SPECIFIC_MAKEFILE := $(BUILD_COMBOS)/arch/$(TARGET_ARCH)/$(TARGET_ARCH_VARIANT).mk
 ifeq ($(strip $(wildcard $(TARGET_ARCH_SPECIFIC_MAKEFILE))),)
 $(error Unknown ARM architecture version: $(TARGET_ARCH_VARIANT))
-endif
-
-ifeq ($(DONT_WARN_STRICT_ALIASING),)
-STRICT_ALIASING_WARNINGS := \
-                        -Wstrict-aliasing=2 \
-                        -Werror=strict-aliasing
 endif
 
 include $(TARGET_ARCH_SPECIFIC_MAKEFILE)
@@ -81,13 +70,10 @@ endif
 
 TARGET_NO_UNDEFINED_LDFLAGS := -Wl,--no-undefined
 
-TARGET_arm_CFLAGS :=    -O3 \
+TARGET_arm_CFLAGS :=    -O2 \
                         -fomit-frame-pointer \
                         -fstrict-aliasing    \
-                        -funswitch-loops \
-                        -funsafe-loop-optimizations \
-                        -ftree-vectorize \
-                        -pipe $(STRICT_ALIASING_WARNINGS)
+                        -funswitch-loops
 
 # Modules can choose to compile some source as thumb. As
 # non-thumb enabled targets are supported, this is treated
@@ -95,27 +81,12 @@ TARGET_arm_CFLAGS :=    -O3 \
 # compiled as ARM.
 ifeq ($(ARCH_ARM_HAVE_THUMB_SUPPORT),true)
 TARGET_thumb_CFLAGS :=  -mthumb \
-                        -O3 \
+                        -Os \
                         -fomit-frame-pointer \
-                        -fstrict-aliasing \
-                        -funsafe-math-optimizations \
-                        -pipe $(STRICT_ALIASING_WARNINGS)
-
-#SHUT THE F$#@ UP!
-TARGET_arm_CFLAGS +=    -Wno-unused-parameter \
-                        -Wno-unused-value \
-                        -Wno-unused-function
-
-TARGET_thumb_CFLAGS +=  -Wno-unused-parameter \
-                        -Wno-unused-value \
-                        -Wno-unused-function
-
-# Turn off strict-aliasing if we're building an AOSP variant without the
-# patchset...
-ifeq ($(DEBUG_NO_STRICT_ALIASING),yes)
-TARGET_arm_CFLAGS += -fno-strict-aliasing -Wno-error=strict-aliasing
-TARGET_thumb_CFLAGS += -fno-strict-aliasing -Wno-error=strict-aliasing
-endif   
+                        -fno-strict-aliasing
+else
+TARGET_thumb_CFLAGS := $(TARGET_arm_CFLAGS)
+endif
 
 # Set FORCE_ARM_DEBUGGING to "true" in your buildspec.mk
 # or in your environment to force a full arm build, even for
@@ -136,7 +107,7 @@ arch_include_dir := $(dir $(android_config_h))
 
 ifeq ($(TARGET_DISABLE_ARM_PIE),true)
    PIE_GLOBAL_CFLAGS :=
-   PIE_EXECUTABLE_TRANSFORM :=
+   PIE_EXECUTABLE_TRANSFORM := -Wl,-T,$(BUILD_SYSTEM)/armelf.x
 else
    PIE_GLOBAL_CFLAGS := -fPIE
    PIE_EXECUTABLE_TRANSFORM := -fPIE -pie
@@ -150,10 +121,10 @@ TARGET_GLOBAL_CFLAGS += \
 			-fstack-protector \
 			-Wa,--noexecstack \
 			-Werror=format-security \
-			-D_FORTIFY_SOURCE=0 \
 			-fno-short-enums \
-			-pipe \
-			$(arch_variant_cflags) $(STRICT_ALIASING_WARNINGS)
+			$(arch_variant_cflags) \
+			-include $(android_config_h) \
+			-I $(arch_include_dir)
 
 # This warning causes dalvik not to build with gcc 4.6.x and -Werror.
 # We cannot turn it off blindly since the option is not available
@@ -178,25 +149,30 @@ TARGET_GLOBAL_LDFLAGS += \
 			-Wl,-z,noexecstack \
 			-Wl,-z,relro \
 			-Wl,-z,now \
-			-Wl,--warn-shared-textrel \
-			-Wl,--fatal-warnings \
-			$(arch_variant_ldflags) $(gcc_variant_ldflags)
+			-Wl,--icf=safe \
+			$(arch_variant_ldflags)
 
-# more always true garglemesh:
-TARGET_GLOBAL_CFLAGS += -mthumb-interwork
+# We only need thumb interworking in cases where thumb support
+# is available in the architecture, and just to be sure, (and
+# since sometimes thumb-interwork appears to be default), we
+# specifically disable when thumb support is unavailable.
+ifeq ($(ARCH_ARM_HAVE_THUMB_SUPPORT),true)
+TARGET_GLOBAL_CFLAGS +=	-mthumb-interwork
+else
+TARGET_GLOBAL_CFLAGS +=	-mno-thumb-interwork
+endif
 
-TARGET_GLOBAL_CPPFLAGS += \
-			-fvisibility-inlines-hidden \
-			$(arch_variant_cflags)
+TARGET_GLOBAL_CPPFLAGS += -fvisibility-inlines-hidden
 
 # More flags/options can be added here
 TARGET_RELEASE_CFLAGS := \
 			-DNDEBUG \
 			-g \
+			-Wstrict-aliasing=2 \
 			-fgcse-after-reload \
 			-frerun-cse-after-loop \
-			-frename-registers \
-			-pipe
+			-frename-registers
+
 libc_root := bionic/libc
 libm_root := bionic/libm
 libstdc++_root := bionic/libstdc++
@@ -280,7 +256,6 @@ TARGET_CUSTOM_LD_COMMAND := true
 # Enable the Dalvik JIT compiler if not already specified.
 ifeq ($(strip $(WITH_JIT)),)
     WITH_JIT := true
-    WITH_JIT_TUNING := true
 endif
 
 define transform-o-to-shared-lib-inner
